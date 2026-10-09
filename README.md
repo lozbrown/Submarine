@@ -29,6 +29,7 @@
 - **Zero-knowledge cloud sync** — profiles are Argon2id + AES-256-GCM sealed on your device before upload; the server (and everyone else) only sees ciphertext. Browser dashboard at [`api.sinaxhpm.com/account`](https://api.sinaxhpm.com/account/) to manage your account and stored profiles
 - **Docker manager** — containers, logs (live tail), stats, prune, and `docker exec` shells as first-class session tabs
 - **Import from anywhere** — PuTTY `.reg`, MobaXterm `.mxtsessions`, OpenSSH config, and Submarine JSON exports all bulk-imported from the Servers page
+- **Native Tailcat transport** — connect to a `tc...` Tailcat address on Android, Windows, macOS, or Linux without installing Tailscale, OpenTailcat, or a separate Tailcat executable
 - **Secure by default** — TOFU host keys with per-connection nonce binding, strict CSP, minimal Tauri permission ACL, zeroized master key
 
 ## Screenshots
@@ -153,6 +154,18 @@ Manage Docker on any session host without typing a single `docker` command.
 - Dynamic supports **SOCKS4, SOCKS4a, SOCKS5, SOCKS5h, HTTP CONNECT, and plain HTTP proxy**
 - Each tunnel starts and stops independently, saved with the server profile
 
+### Tailcat transport
+
+Submarine can use [Tailcat](https://github.com/tailscale/tailcat) as the private TCP transport beneath its normal SSH client. This is useful when the SSH host is exposed with Tailcat rather than a public IP address.
+
+1. In a saved server or **Quick connect**, select **Tailcat** as the transport.
+2. Paste the complete `tc...` Tailcat address into **Tailcat address** and retain the normal SSH port, username, and authentication settings (port `22` by default).
+3. Connect normally — terminal, SFTP, monitoring, and other SSH connections use the same app-managed Tailcat client where appropriate.
+
+- **No system VPN.** Submarine packages a small Tailcat bridge for Android and desktop. It does not require Tailscale, OpenTailcat, a separate `tailcat` command, Android VPN permission, or a TUN interface.
+- **Keep the address secret.** A Tailcat address can contain a WireGuard pre-shared key. Submarine stores it in the encrypted vault, masks it in the UI, and redacts it from ordinary logs and errors.
+- **SSH verification remains enabled.** Tailcat transports TCP only; Submarine still performs its normal SSH host-key verification and uses your existing SSH key, password, or keyboard-interactive authentication.
+
 ### End-to-End Encrypted Profile Sync
 
 - Save servers once, access them on every machine you own
@@ -174,15 +187,28 @@ Pick a binary from the [latest release](https://github.com/sinaxhpm/submarine/re
 
 | OS | File |
 |---|---|
-| Windows 10 / 11 | `.exe` installer or `.msi` |
+| Windows 10 / 11 | `.exe` installer or `.msi`, or the [portable](#portable-mode-windows) `.zip` |
 | macOS (Apple Silicon, or Intel via Rosetta) | `.dmg` or `.app.zip` |
 | Debian / Ubuntu / Mint | `.deb` — `sudo apt install ./submarine_*.deb` |
 | Fedora / RHEL / openSUSE | `.rpm` — `sudo dnf install ./submarine-*.rpm` |
 | Arch / Manjaro / EndeavourOS | `.pkg.tar.zst` — `sudo pacman -U submarine-*.pkg.tar.zst` |
 | Any Linux | `.AppImage` — `chmod +x` and double-click |
-| Android 8.0+ | `.apk` — sideload, no Play Store required |
+| Android 8.0+ | `android-arm64-v8a.apk` for modern phones, or `android-armeabi-v7a.apk` for older 32-bit devices — sideload, no Play Store required |
 
 > Builds are currently **unsigned**. Windows SmartScreen will prompt — click "More info → Run anyway". On macOS you may need `xattr -d com.apple.quarantine /Applications/Submarine.app`. Android sideloading needs "Install unknown apps" enabled for the installer source.
+
+### Portable mode (Windows)
+
+Submarine can keep all of its data next to the executable instead of in your user profile — on a USB stick, say. Create an empty folder named `submarine-data` beside `submarine.exe` and start the app; the `-portable.zip` release asset is already laid out that way. Profiles, the cloud sign-in, the window position and the UI preferences then live in `submarine-data`, and **Settings → Maintenance** shows the folder in use.
+
+A first portable launch starts with no profiles. To carry existing data over, close Submarine and copy two things into `submarine-data`:
+
+- the contents of `%APPDATA%\com.submarine.app`, except `sync_device.json` — it identifies each install to cloud sync, and the portable copy creates its own;
+- the folder `%LOCALAPPDATA%\com.submarine.app\EBWebView`. It holds the app's settings, including **Auto-sync**. Without it Auto-sync starts out on, and the first profile you open is uploaded to your cloud — so if you skip this folder, turn Auto-sync off in Settings before opening a profile you keep only on this computer.
+
+`submarine-data` then holds your encrypted profiles and your cloud sign-in token, so keep it somewhere only you can read.
+
+Not portable: the Microsoft Edge WebView2 runtime (a Windows system component, preinstalled on Windows 11 and current Windows 10) and the short-lived temp files used while editing or dragging remote files. If `submarine-data` can't be written to, Submarine falls back to the usual per-user folders and says so in Settings. (A plain, non-packaged Linux build works the same way — it just doesn't ship a prebuilt zip.)
 
 ### Android
 
@@ -195,6 +221,7 @@ Submarine on Android is a true native build of the same Rust core — same SSH s
 - **Port forwarding (SOCKS / local / remote)** runs as long as the app is open — handy for tunnelling a mobile browser through your home box.
 - **Touch-friendly Info / Docker tabs.** Same server inspection and container manager as desktop, with ≥32 px touch targets and full-bleed modals.
 - **Folder mirror is desktop-only for now** — Android's filesystem permissions don't map cleanly onto our watcher model.
+- **Tailcat transport** connects directly to Tailcat-exposed SSH services without granting Android VPN permission or installing a separate networking app.
 
 Tested on Android 8.0+ (API 26+). Phones, tablets, and Android-on-ChromeOS.
 
@@ -248,7 +275,7 @@ Smaller installer (around 10 MB vs ~100 MB for an Electron equivalent), lower RA
 
 ### Where are my profiles stored?
 
-In a single encrypted file under your OS app-data directory. Nothing in plaintext. Nothing in a global Keychain or registry hive.
+In a single encrypted file under your OS app-data directory — or in the `submarine-data` folder when you run in [portable mode](#portable-mode-windows). Nothing in plaintext. Nothing in a global Keychain or registry hive.
 
 ### Does Submarine collect telemetry or analytics?
 
@@ -264,7 +291,7 @@ No. Distribution is via sideloadable APK from the [releases page](https://github
 
 ## Build from Source
 
-Requirements: Node 20+, Rust stable, [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS. Windows additionally needs **Strawberry Perl** for the vendored OpenSSL build (`winget install StrawberryPerl.StrawberryPerl`).
+Requirements: Node 20+, Rust 1.90+, [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS. The SSH stack is pure Rust, so no OpenSSL or Perl is needed on any platform.
 
 ```bash
 git clone https://github.com/sinaxhpm/submarine
@@ -276,7 +303,7 @@ npm run tauri build        # build release bundle
 
 ### Android build
 
-Extra requirements: Android SDK + Platform-Tools, NDK 27, and JDK 17. `scripts/android-env.ps1` sets `JAVA_HOME`, `ANDROID_HOME`, and `NDK_HOME` for the current PowerShell session.
+Extra requirements: Android SDK + Platform-Tools, NDK 27, and JDK 17. `scripts/android-env.ps1` sets `JAVA_HOME`, `ANDROID_HOME`, and `NDK_HOME` for the current PowerShell session. It finds the SDK through `ANDROID_HOME` or `ANDROID_SDK_ROOT`, or in Android Studio's default folder (`%LOCALAPPDATA%\Android\Sdk`).
 
 ```powershell
 . .\scripts\android-env.ps1

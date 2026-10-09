@@ -14,6 +14,12 @@ use tauri::Manager;
 use serde_json::json;
 use ssh_key::{private::{Ed25519Keypair, Ed25519PrivateKey}, PrivateKey};
 mod ssh_manager;
+#[cfg(feature = "tailcat-capi")]
+// The FFI layer is intentionally staged ahead of its transport/UI wiring;
+// feature-enabled ABI tests exercise it without making the default app build
+// carry Tailcat native code.
+#[allow(dead_code)]
+mod tailcat_capi;
 mod tunnel;
 mod monitor;
 mod cloud;

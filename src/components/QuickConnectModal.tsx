@@ -16,6 +16,8 @@ export interface QuickAuth {
   password?: string | null;
   private_key?: string | null;
   passphrase?: string | null;
+  transport?: "direct" | "tailcat";
+  tailcat_address?: string | null;
 }
 
 interface Props {
@@ -26,6 +28,8 @@ interface Props {
 
 const QuickConnectModal = ({ isOpen, onClose, onConnect }: Props) => {
   const [host, setHost] = useState("");
+  const [transport, setTransport] = useState<"direct" | "tailcat">("direct");
+  const [tailcatAddress, setTailcatAddress] = useState("");
   const [port, setPort] = useState<number>(22);
   const [username, setUsername] = useState("root");
   const [authMode, setAuthMode] = useState<"password" | "key">("password");
@@ -37,7 +41,7 @@ const QuickConnectModal = ({ isOpen, onClose, onConnect }: Props) => {
   if (!isOpen) return null;
 
   const reset = () => {
-    setHost(""); setPort(22); setUsername("root");
+    setHost(""); setTransport("direct"); setTailcatAddress(""); setPort(22); setUsername("root");
     setAuthMode("password"); setPassword(""); setPrivateKey(""); setPassphrase("");
     setErr(null);
   };
@@ -46,19 +50,22 @@ const QuickConnectModal = ({ isOpen, onClose, onConnect }: Props) => {
 
   const connect = () => {
     setErr(null);
-    if (!host.trim()) { setErr("Host is required"); return; }
+    if (transport === "direct" && !host.trim()) { setErr("Host is required"); return; }
+    if (transport === "tailcat" && !tailcatAddress.trim().startsWith("tc")) { setErr("Enter a Tailcat address beginning with tc"); return; }
     if (!port || port < 1 || port > 65535) { setErr("Port must be 1–65535"); return; }
     if (authMode === "key" && !privateKey.trim()) { setErr("Private key body is required"); return; }
 
     // A blank username (issue #54) and an empty password (issue #30) are both
     // asked for when connecting; an empty "Login as" answer means root.
     const auth: QuickAuth = {
-      host: host.trim(),
+      host: transport === "tailcat" ? "tailcat" : host.trim(),
       port,
       username: username.trim(),
       password: authMode === "password" && password ? password : null,
       private_key: authMode === "key" ? privateKey : null,
       passphrase: authMode === "key" && passphrase ? passphrase : null,
+      transport,
+      tailcat_address: transport === "tailcat" ? tailcatAddress.trim() : null,
     };
     reset();
     onConnect(auth);
@@ -82,14 +89,21 @@ const QuickConnectModal = ({ isOpen, onClose, onConnect }: Props) => {
             </div>
           )}
 
+          <div className="flex justify-between items-center">
+            <label className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider ml-0.5">Transport</label>
+            <select value={transport} onChange={e => setTransport(e.target.value as "direct" | "tailcat")} className="h-8 px-2 bg-zinc-900/60 border border-white/10 rounded-lg text-[12px] text-zinc-50 outline-none">
+              <option value="direct">Direct</option><option value="tailcat">Tailcat</option>
+            </select>
+          </div>
           {/* Host + port */}
           <div className="grid grid-cols-4 gap-2">
             <div className="col-span-3 space-y-1">
-              <label className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider ml-0.5">Host</label>
+              <label className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider ml-0.5">{transport === "tailcat" ? "Tailcat address" : "Host"}</label>
               <input
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                placeholder="192.168.1.1 or example.com"
+                type={transport === "tailcat" ? "password" : "text"}
+                value={transport === "tailcat" ? tailcatAddress : host}
+                onChange={(e) => transport === "tailcat" ? setTailcatAddress(e.target.value) : setHost(e.target.value)}
+                placeholder={transport === "tailcat" ? "tc…" : "192.168.1.1 or example.com"}
                 className="w-full h-9 px-3 bg-zinc-900/60 border border-white/10 rounded-lg text-[12.5px] text-zinc-50 outline-none focus:border-primary/50"
                 autoFocus
               />

@@ -194,6 +194,10 @@ pub struct NodeAuth {
     pub proxy_type: String,
     pub proxy_host: Option<String>,
     pub proxy_port: Option<u16>,
+    #[serde(default)]
+    pub transport: String,
+    #[serde(default)]
+    pub tailcat_address: Option<String>,
 }
 
 /// A user-defined metric. The probe loop wraps each command in BEGIN/END
@@ -690,6 +694,19 @@ impl tokio::io::AsyncWrite for StreamBox {
 /// Same matrix as the interactive connect path, kept narrow to the three
 /// kinds we already support there.
 async fn open_transport(auth: &NodeAuth, connect_timeout: Duration) -> Result<Box<dyn AsyncStream>, String> {
+    if auth.transport == "tailcat" {
+        let _address = auth.tailcat_address.as_deref().filter(|value| value.trim().starts_with("tc"))
+            .ok_or("Tailcat address is missing or invalid")?;
+        #[cfg(feature = "tailcat-capi")]
+        {
+            return tokio::time::timeout(connect_timeout, crate::tailcat_capi::open_tcp(_address, auth.port))
+                .await
+                .map_err(|_| "Tailcat connection timed out".to_string())?
+                .map(|stream| Box::new(stream) as Box<dyn AsyncStream>);
+        }
+        #[cfg(not(feature = "tailcat-capi"))]
+        { return Err("This Submarine build was not compiled with Tailcat support".into()); }
+    }
     match auth.proxy_type.as_str() {
         "socks5" => {
             let p_host = auth.proxy_host.as_deref().filter(|s| !s.is_empty())
@@ -803,9 +820,20 @@ async fn connect_for_monitor(
 
     let config = Arc::new(monitor_client_config());
 
+    let verification_host = if auth.transport == "tailcat" {
+        let _address = auth.tailcat_address.as_deref().filter(|value| value.trim().starts_with("tc"))
+            .ok_or("Tailcat address is missing or invalid")?;
+        #[cfg(feature = "tailcat-capi")]
+        { crate::tailcat_capi::verification_host(_address) }
+        #[cfg(not(feature = "tailcat-capi"))]
+        { return Err("This Submarine build was not compiled with Tailcat support".into()); }
+    } else {
+        auth.host.clone()
+    };
+
     let handler = MonitorHandler {
         db: Arc::clone(db),
-        host: auth.host.clone(),
+        host: verification_host.clone(),
         port: auth.port,
     };
 
@@ -820,7 +848,7 @@ async fn connect_for_monitor(
         client::connect_stream(config, StreamBox(transport), handler),
     )
     .await
-    .map_err(|_| format!("SSH handshake to {}:{} timed out", auth.host, auth.port))?
+    .map_err(|_| format!("SSH handshake to {}:{} timed out", verification_host, auth.port))?
     .map_err(|e| format!("SSH connect: {}", e))?;
 
     // Auth order: try key first (more secure), only fall back to password

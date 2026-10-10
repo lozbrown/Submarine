@@ -459,10 +459,21 @@ const AddNodePanel = ({ isOpen, onClose, newNode, setNewNode, onSave, credential
               </div>
             </div>
 
+            <div className="flex justify-between items-center gap-3">
+              <label className="text-[11px] font-bold text-zinc-400 ml-1">Transport</label>
+              <select
+                className="h-9 bg-[#1a1a1e] rounded-lg px-3 text-[12px] text-zinc-300 border border-white/10 outline-none focus:border-primary/50"
+                value={newNode.transport || "direct"}
+                onChange={e => setNewNode({ ...newNode, transport: e.target.value, proxyType: e.target.value === "tailcat" ? "none" : newNode.proxyType, jumpHostId: e.target.value === "tailcat" ? "" : newNode.jumpHostId })}
+              >
+                <option value="direct">Direct</option>
+                <option value="tailcat">Tailcat</option>
+              </select>
+            </div>
             <div className="grid grid-cols-4 gap-4">
               <div className="col-span-3 space-y-1.5">
-                <label className="text-[11px] font-bold text-zinc-400 ml-1">Host</label>
-                <input type="text" className="w-full h-9 bg-[#1a1a1e] rounded-lg px-3 text-[12px] text-white border border-white/10 outline-none focus:border-primary/50 focus:bg-[#232328] transition-all shadow-inner" placeholder="192.168.1.1 or example.com" value={newNode.host} onChange={e => setNewNode({ ...newNode, host: e.target.value })} />
+                <label className="text-[11px] font-bold text-zinc-400 ml-1">{newNode.transport === "tailcat" ? "Tailcat address" : "Host"}</label>
+                <input type={newNode.transport === "tailcat" ? "password" : "text"} autoComplete="off" className="w-full h-9 bg-[#1a1a1e] rounded-lg px-3 text-[12px] text-white border border-white/10 outline-none focus:border-primary/50 focus:bg-[#232328] transition-all shadow-inner" placeholder={newNode.transport === "tailcat" ? "tc…" : "192.168.1.1 or example.com"} value={newNode.transport === "tailcat" ? (newNode.tailcatAddress || "") : newNode.host} onChange={e => newNode.transport === "tailcat" ? setNewNode({ ...newNode, tailcatAddress: e.target.value, tailcatAddressDirty: true }) : setNewNode({ ...newNode, host: e.target.value })} />
               </div>
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-zinc-400 ml-1">Port</label>
@@ -599,14 +610,14 @@ const AddNodePanel = ({ isOpen, onClose, newNode, setNewNode, onSave, credential
           <div className="pt-5 border-t border-white/5 space-y-4">
             <div className="flex justify-between items-center">
               <label className="text-[11px] font-bold text-zinc-400">Proxy</label>
-              <select className="bg-transparent text-[12px] font-bold text-zinc-300 outline-none cursor-pointer" value={newNode.proxyType} onChange={e => setNewNode({ ...newNode, proxyType: e.target.value })}>
+              <select disabled={newNode.transport === "tailcat"} className="bg-transparent text-[12px] font-bold text-zinc-300 outline-none cursor-pointer disabled:opacity-40" value={newNode.transport === "tailcat" ? "none" : newNode.proxyType} onChange={e => setNewNode({ ...newNode, proxyType: e.target.value })}>
                 <option value="none" className="bg-[#121215] text-zinc-400">No proxy</option>
                 <option value="socks5" className="bg-[#121215] text-zinc-400">SOCKS5</option>
                 <option value="http" className="bg-[#121215] text-zinc-400">HTTP</option>
               </select>
             </div>
 
-            {newNode.proxyType !== 'none' && (
+            {newNode.transport !== "tailcat" && newNode.proxyType !== 'none' && (
               <div className="grid grid-cols-4 gap-3 animate-in fade-in">
                 <input
                   className="col-span-3 h-9 bg-[#1a1a1e] rounded-lg px-3 text-[12px] text-white border border-white/10 outline-none focus:border-primary/50 transition-all shadow-inner"
@@ -633,7 +644,8 @@ const AddNodePanel = ({ isOpen, onClose, newNode, setNewNode, onSave, credential
               <label className="text-[11px] font-bold text-zinc-400 shrink-0">Jump via</label>
               <select
                 className="flex-1 min-w-0 h-9 bg-[#1a1a1e] rounded-lg px-3 text-[12px] text-zinc-300 border border-white/10 outline-none focus:border-primary/50 focus:bg-[#232328] transition-all shadow-inner"
-                value={newNode.jumpHostId || ""}
+                disabled={newNode.transport === "tailcat"}
+                value={newNode.transport === "tailcat" ? "" : (newNode.jumpHostId || "")}
                 onChange={e => setNewNode({ ...newNode, jumpHostId: e.target.value })}
               >
                 <option value="" className="bg-[#1a1a1e] text-zinc-500">Direct — no jump host</option>

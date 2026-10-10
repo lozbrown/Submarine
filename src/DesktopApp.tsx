@@ -213,6 +213,7 @@ function DesktopApp() {
     // *after* they've saved a few credentials and want to reuse one.
     authType: "custom_pass", credentialId: "", folderId: "", keyId: "",
     proxyType: "none", proxyHost: "", proxyPort: 1080,
+    transport: "direct", tailcatAddress: "", tailcatAddressDirty: false,
     tunnels: [] as { local: string, remote: string, type: string }[],
     autostart: false,
     mirrors: [] as { local: string, remote: string, soft_delete: boolean, excludes: string[], conflict_resolution: string }[],
@@ -707,12 +708,20 @@ function DesktopApp() {
     // sheet — that way the password never sits in renderer memory during
     // the normal grid/sidebar lifetime.
     let revealedPassword = "";
+    let revealedTailcatAddress = "";
     if (server.has_password) {
       try {
         const v = await invoke<string | null>("reveal_server_password", { id: server.id });
         revealedPassword = v || "";
       } catch (e) {
         addLog(`REVEAL_PASSWORD_FAILED: ${e}`, "error");
+      }
+    }
+    if (server.transport === "tailcat" && server.has_tailcat_address) {
+      try {
+        revealedTailcatAddress = await invoke<string | null>("reveal_server_tailcat_address", { id: server.id }) || "";
+      } catch (e) {
+        addLog(`REVEAL_TAILCAT_ADDRESS_FAILED: ${e}`, "error");
       }
     }
     setNewNode({
@@ -729,6 +738,9 @@ function DesktopApp() {
       proxyType: server.proxy_type || "none",
       proxyHost: server.proxy_host || "",
       proxyPort: server.proxy_port || 1080,
+      transport: server.transport || "direct",
+      tailcatAddress: revealedTailcatAddress,
+      tailcatAddressDirty: false,
       tunnels: server.tunnels ? JSON.parse(server.tunnels) : [],
       autostart: !!server.autostart,
       mirrors: (() => {
@@ -2326,9 +2338,9 @@ function DesktopApp() {
         newNode={newNode} setNewNode={setNewNode}
         isEditMode={!!newNode.id}
         onSave={async () => {
-          if (!newNode.name || !newNode.host) {
-            setFormError("Name and Host are required.");
-            addLog("Name and Host are required.", "error");
+          if (!newNode.name || (newNode.transport !== "tailcat" && !newNode.host) || (newNode.transport === "tailcat" && !newNode.tailcatAddress?.trim())) {
+            setFormError(newNode.transport === "tailcat" ? "Name and Tailcat address are required." : "Name and Host are required.");
+            addLog("Connection details are required.", "error");
             return;
           }
           if (newNode.authType === "vault" && !newNode.credentialId) {
@@ -2350,7 +2362,7 @@ function DesktopApp() {
             const isInline = newNode.authType === "custom_pass" || newNode.authType === "custom_key";
             const payload = {
               name: newNode.name,
-              host: newNode.host,
+              host: newNode.transport === "tailcat" ? "tailcat" : newNode.host,
               port: newNode.port,
               // A blank username stays blank: the connection asks for it
               // ("Login as", issue #54).
@@ -2358,7 +2370,7 @@ function DesktopApp() {
               password: newNode.authType === "custom_pass" ? (newNode.password || null) : null,
               credentialId: (newNode.authType === "vault" && newNode.credentialId) ? parseInt(newNode.credentialId) : null,
               folderId: newNode.folderId ? parseInt(newNode.folderId) : null,
-              proxyType: newNode.proxyType || "none",
+              proxyType: newNode.transport === "tailcat" ? "none" : (newNode.proxyType || "none"),
               proxyHost: newNode.proxyHost || "",
               proxyPort: newNode.proxyPort || 1080,
               tunnels: newNode.tunnels || [],
@@ -2378,6 +2390,12 @@ function DesktopApp() {
               : invoke<number>("add_server", payload);
 
             const savedId = await action;
+            await invoke("set_server_transport", {
+              id: savedId,
+              transport: newNode.transport || "direct",
+              tailcatAddress: newNode.transport === "tailcat" ? (newNode.tailcatAddress || null) : null,
+              preserveTailcatAddress: !!newNode.id && !newNode.tailcatAddressDirty,
+            });
             // Notes live on the server row but go through their own command
             // (set_server_notes) so we don't have to thread a long-text field
             // through every add/edit_server signature. Empty string is valid
@@ -2396,7 +2414,7 @@ function DesktopApp() {
             // ProxyJump target — same separate-write pattern. Empty string
             // means "no jump host" → store NULL.
             try {
-              await invoke("set_server_jump_host", { id: savedId, value: newNode.jumpHostId ? parseInt(newNode.jumpHostId) : null });
+              await invoke("set_server_jump_host", { id: savedId, value: newNode.transport === "tailcat" ? null : (newNode.jumpHostId ? parseInt(newNode.jumpHostId) : null) });
             } catch (e) {
               addLog(`SAVE_JUMP_HOST_FAILED: ${e}`, "error");
             }

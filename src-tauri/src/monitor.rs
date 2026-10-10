@@ -695,6 +695,9 @@ impl tokio::io::AsyncWrite for StreamBox {
 /// kinds we already support there.
 async fn open_transport(auth: &NodeAuth, connect_timeout: Duration) -> Result<Box<dyn AsyncStream>, String> {
     if auth.transport == "tailcat" {
+        if auth.proxy_type != "none" {
+            return Err("Tailcat connections cannot use a proxy or ProxyJump".into());
+        }
         let _address = auth.tailcat_address.as_deref().filter(|value| value.trim().starts_with("tc"))
             .ok_or("Tailcat address is missing or invalid")?;
         #[cfg(feature = "tailcat-capi")]

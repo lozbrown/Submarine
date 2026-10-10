@@ -94,6 +94,14 @@ pub fn native_abi_version() -> u32 {
     unsafe { ffi::tc_abi_version() }
 }
 
+fn redact_native_detail(detail: String) -> String {
+    if detail.contains("tc") {
+        "[redacted]".into()
+    } else {
+        detail
+    }
+}
+
 fn native_error(status: i32, error: *mut c_char) -> String {
     // libtailcat documents that configuration errors never echo secrets. Keep
     // that boundary nevertheless: only error text allocated by libtailcat is
@@ -112,9 +120,12 @@ fn native_error(status: i32, error: *mut c_char) -> String {
         Some(value)
     };
     match detail {
-        Some(detail) if !detail.is_empty() => {
-            format!("Tailcat native transport failed (status {status}): {detail}")
-        }
+        // Native errors are dependency-controlled text. Do not let a future
+        // libtailcat version turn a capability into an application log entry.
+        Some(detail) if !detail.is_empty() => format!(
+            "Tailcat native transport failed (status {status}): {}",
+            redact_native_detail(detail)
+        ),
         _ => format!("Tailcat native transport failed (status {status})"),
     }
 }
@@ -299,6 +310,13 @@ impl ConnectionInner {
         }
     }
 
+    fn request_close(self: &Arc<Self>) {
+        if !self.closed.swap(true, Ordering::AcqRel) {
+            let handle = self.handle;
+            std::thread::spawn(move || close_handle(handle));
+        }
+    }
+
     fn read(&self) -> Result<(Vec<u8>, bool), String> {
         let mut buffer = vec![0_u8; BUFFER_SIZE];
         let mut count = 0;
@@ -397,7 +415,7 @@ impl TailcatStream {
                 }
             }
             let _ = app_write.shutdown().await;
-            read_connection.close();
+            read_connection.request_close();
         });
 
         let write_connection = connection.clone();
@@ -417,7 +435,7 @@ impl TailcatStream {
                     break;
                 }
             }
-            write_connection.close();
+            write_connection.request_close();
         });
 
         Ok(Self { stream, connection })
@@ -429,8 +447,7 @@ impl Drop for TailcatStream {
         // `tc_close` waits for an outstanding blocking read/write. Never make
         // an SSH task's destructor wait for that work; the ABI promises close
         // itself interrupts those calls.
-        let connection = self.connection.clone();
-        std::thread::spawn(move || connection.close());
+        self.connection.request_close();
     }
 }
 
@@ -477,6 +494,11 @@ mod tests {
         let token = "tcABCDEF-secret";
         assert_eq!(verification_host(token), verification_host(token));
         assert!(!verification_host(token).contains(token));
+    }
+
+    #[test]
+    fn native_error_detail_cannot_expose_a_capability() {
+        assert_eq!(redact_native_detail("dial tcABCDEF-secret failed".into()), "[redacted]");
     }
 
     #[test]

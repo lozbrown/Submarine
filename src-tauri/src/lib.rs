@@ -4211,6 +4211,8 @@ async fn add_server(
     autostart: Option<bool>,
     mirrors: Option<Vec<serde_json::Value>>,
     color: Option<String>,
+    transport: Option<String>,
+    tailcat_address: Option<String>,
 ) -> Result<i64, String> {
     let conn_guard = state.conn.lock().map_err(|_| "[STATE] LOCK_FAILED")?;
     let conn = conn_guard.as_ref().ok_or("[STATE] DATABASE_NOT_INITIALIZED")?;
@@ -4227,11 +4229,13 @@ async fn add_server(
     let (db_username, db_password, db_key_id, db_credential_id) = normalize_server_identity(
         &auth_type, username, password, key_id, credential_id,
     );
+    let (transport, tailcat_address) = normalize_transport(transport, tailcat_address)?;
+    let proxy_type = if transport == "tailcat" { "none".to_string() } else { proxy_type };
 
     let autostart_i: i32 = if autostart.unwrap_or(false) { 1 } else { 0 };
     let res = conn.execute(
-        "INSERT INTO servers (name, host, port, username, password, credential_id, folder_id, proxy_type, proxy_host, proxy_port, tunnels, auth_type, key_id, autostart, mirrors, color) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-        rusqlite::params![name, host, port, db_username, db_password, db_credential_id, folder_id, proxy_type, proxy_host, proxy_port, tunnels_json, auth_type, db_key_id, autostart_i, mirrors_json, color],
+        "INSERT INTO servers (name, host, port, username, password, credential_id, folder_id, transport, tailcat_address, proxy_type, proxy_host, proxy_port, tunnels, auth_type, key_id, autostart, mirrors, color) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        rusqlite::params![name, host, port, db_username, db_password, db_credential_id, folder_id, transport, tailcat_address, proxy_type, proxy_host, proxy_port, tunnels_json, auth_type, db_key_id, autostart_i, mirrors_json, color],
     ).map_err(|e| format!("[DATABASE] SERVER_INSERT_FAILED: SQL_ERROR={}", e))?;
 
     if res == 0 {
@@ -4273,11 +4277,7 @@ async fn save_quick_connect_node(
     // A blank username stays blank: the saved node then asks for it at
     // connect time too (issue #54), exactly like the live session does.
     let username = auth.username.trim().to_string();
-    let transport = if auth.transport == "tailcat" { "tailcat" } else { "direct" };
-    let tailcat_address = if transport == "tailcat" {
-        Some(auth.tailcat_address.as_deref().filter(|value| value.trim().starts_with("tc"))
-            .ok_or("Tailcat address is missing or invalid")?.trim().to_string())
-    } else { None };
+    let (transport, tailcat_address) = normalize_transport(Some(auth.transport.clone()), auth.tailcat_address.clone())?;
     let stored_host = if transport == "tailcat" { "tailcat" } else { auth.host.as_str() };
 
     // Dedup against existing, non-deleted ROOT nodes with the same identity so
@@ -4359,6 +4359,8 @@ async fn edit_server(
     // whenever the password field wasn't touched, and the SQL below uses
     // COALESCE(?, password) so the existing column survives.
     preserve_password: Option<bool>,
+    transport: Option<String>,
+    tailcat_address: Option<String>,
 ) -> Result<(), String> {
     let tunnels_json = serde_json::to_string(&tunnels).unwrap_or_else(|_| "[]".to_string());
     let mirrors_json = mirrors.as_ref()
@@ -4368,6 +4370,8 @@ async fn edit_server(
     let (db_username, db_password, db_key_id, db_credential_id) = normalize_server_identity(
         &auth_type, username, password, key_id, credential_id,
     );
+    let (transport, tailcat_address) = normalize_transport(transport, tailcat_address)?;
+    let proxy_type = if transport == "tailcat" { "none".to_string() } else { proxy_type };
     let autostart_i: i32 = if autostart.unwrap_or(false) { 1 } else { 0 };
 
     // All SQLite work is scoped so the non-Send connection guard is fully
@@ -4400,13 +4404,13 @@ async fn edit_server(
         // because normalize_server_identity zeros password for the other modes.
         if preserve_password.unwrap_or(false) && auth_type == "custom_pass" {
             conn.execute(
-                "UPDATE servers SET name=?1, host=?2, port=?3, username=?4, password=COALESCE(?5, password), credential_id=?6, folder_id=?7, proxy_type=?8, proxy_host=?9, proxy_port=?10, tunnels=?11, auth_type=?12, key_id=?13, autostart=?14, mirrors=?15, color=?16 WHERE id=?17",
-                rusqlite::params![name, host, port, db_username, db_password, db_credential_id, folder_id, proxy_type, proxy_host, proxy_port, tunnels_json, auth_type, db_key_id, autostart_i, mirrors_json, color, id],
+                "UPDATE servers SET name=?1, host=?2, port=?3, username=?4, password=COALESCE(?5, password), credential_id=?6, folder_id=?7, transport=?8, tailcat_address=?9, proxy_type=?10, proxy_host=?11, proxy_port=?12, tunnels=?13, auth_type=?14, key_id=?15, autostart=?16, mirrors=?17, color=?18, jump_host_id=CASE WHEN ?8='tailcat' THEN NULL ELSE jump_host_id END WHERE id=?19",
+                rusqlite::params![name, host, port, db_username, db_password, db_credential_id, folder_id, transport, tailcat_address, proxy_type, proxy_host, proxy_port, tunnels_json, auth_type, db_key_id, autostart_i, mirrors_json, color, id],
             ).map_err(|e| format!("[DATABASE] SERVER_UPDATE_FAILED: SQL_ERROR={}", e))?;
         } else {
             conn.execute(
-                "UPDATE servers SET name=?1, host=?2, port=?3, username=?4, password=?5, credential_id=?6, folder_id=?7, proxy_type=?8, proxy_host=?9, proxy_port=?10, tunnels=?11, auth_type=?12, key_id=?13, autostart=?14, mirrors=?15, color=?16 WHERE id=?17",
-                rusqlite::params![name, host, port, db_username, db_password, db_credential_id, folder_id, proxy_type, proxy_host, proxy_port, tunnels_json, auth_type, db_key_id, autostart_i, mirrors_json, color, id],
+                "UPDATE servers SET name=?1, host=?2, port=?3, username=?4, password=?5, credential_id=?6, folder_id=?7, transport=?8, tailcat_address=?9, proxy_type=?10, proxy_host=?11, proxy_port=?12, tunnels=?13, auth_type=?14, key_id=?15, autostart=?16, mirrors=?17, color=?18, jump_host_id=CASE WHEN ?8='tailcat' THEN NULL ELSE jump_host_id END WHERE id=?19",
+                rusqlite::params![name, host, port, db_username, db_password, db_credential_id, folder_id, transport, tailcat_address, proxy_type, proxy_host, proxy_port, tunnels_json, auth_type, db_key_id, autostart_i, mirrors_json, color, id],
             ).map_err(|e| format!("[DATABASE] SERVER_UPDATE_FAILED: SQL_ERROR={}", e))?;
         }
 
@@ -4648,60 +4652,57 @@ async fn set_server_jump_host(state: tauri::State<'_, DbState>, id: i32, value: 
     Ok(())
 }
 
-/// Store Tailcat transport configuration in the encrypted profile vault. The
-/// address is deliberately omitted from `get_servers`; callers reveal it only
-/// when the user opens that node's edit sheet.
-#[tauri::command]
-async fn set_server_transport(
-    state: tauri::State<'_, DbState>,
-    id: i32,
-    transport: String,
+fn normalize_transport(
+    transport: Option<String>,
     tailcat_address: Option<String>,
-    preserve_tailcat_address: Option<bool>,
-) -> Result<(), String> {
-    let transport = transport.trim().to_ascii_lowercase();
-    let address = match transport.as_str() {
-        "direct" => None,
+) -> Result<(String, Option<String>), String> {
+    let transport = transport.unwrap_or_else(|| "direct".into()).trim().to_ascii_lowercase();
+    match transport.as_str() {
+        "direct" => Ok((transport, None)),
         "tailcat" => {
             let address = tailcat_address.unwrap_or_default().trim().to_string();
-            if address.is_empty() && preserve_tailcat_address.unwrap_or(false) {
-                let conn_guard = state.conn.lock().map_err(|_| "[STATE] LOCK_FAILED")?;
-                let conn = conn_guard.as_ref().ok_or("[STATE] DATABASE_NOT_INITIALIZED")?;
-                return conn.query_row(
-                    "SELECT tailcat_address FROM servers WHERE id=?1 AND transport='tailcat'",
-                    [id],
-                    |row| row.get::<_, Option<String>>(0),
-                ).map_err(|e| format!("[DATABASE] SERVER_TAILCAT_REVEAL_FAILED: {e}"))
-                    .and_then(|existing| existing.ok_or_else(|| "Tailcat address is missing".into()))
-                    .and_then(|existing| {
-                        drop(conn_guard);
-                        let conn_guard = state.conn.lock().map_err(|_| "[STATE] LOCK_FAILED")?;
-                        let conn = conn_guard.as_ref().ok_or("[STATE] DATABASE_NOT_INITIALIZED")?;
-                        conn.execute("UPDATE servers SET transport='tailcat', tailcat_address=?1 WHERE id=?2", rusqlite::params![existing, id])
-                            .map_err(|e| format!("[DATABASE] SERVER_TRANSPORT_FAILED: {e}"))?;
-                        drop(conn_guard);
-                        save_vault_internal(&state)?;
-                        Ok(())
-                    });
-            }
             if !address.starts_with("tc") {
                 return Err("Tailcat address must start with tc".into());
             }
-            Some(address)
+            #[cfg(not(feature = "tailcat-capi"))]
+            return Err("This Submarine build was not compiled with Tailcat support".into());
+            #[cfg(feature = "tailcat-capi")]
+            Ok((transport, Some(address)))
         }
-        _ => return Err("Unsupported connection transport".into()),
-    };
-    let conn_guard = state.conn.lock().map_err(|_| "[STATE] LOCK_FAILED")?;
-    let conn = conn_guard.as_ref().ok_or("[STATE] DATABASE_NOT_INITIALIZED")?;
-    let changed = conn.execute(
-        "UPDATE servers SET transport=?1, tailcat_address=?2 WHERE id=?3",
-        rusqlite::params![transport, address, id],
-    ).map_err(|e| format!("[DATABASE] SERVER_TRANSPORT_FAILED: {e}"))?;
-    if changed == 0 {
-        return Err("Server not found".into());
+        _ => Err("Unsupported connection transport".into()),
     }
-    drop(conn_guard);
-    save_vault_internal(&state)
+}
+
+#[tauri::command]
+fn tailcat_available() -> bool {
+    cfg!(feature = "tailcat-capi")
+}
+
+#[cfg(test)]
+mod tailcat_profile_tests {
+    use super::*;
+
+    #[test]
+    fn direct_transport_never_keeps_a_tailcat_address() {
+        assert_eq!(
+            normalize_transport(Some("direct".into()), Some("tc-secret".into())).unwrap(),
+            ("direct".into(), None),
+        );
+    }
+
+    #[test]
+    fn tailcat_transport_rejects_an_invalid_capability() {
+        assert!(normalize_transport(Some("tailcat".into()), Some("not-a-token".into())).is_err());
+    }
+
+    #[cfg(feature = "tailcat-capi")]
+    #[test]
+    fn tailcat_transport_keeps_a_valid_capability() {
+        assert_eq!(
+            normalize_transport(Some("tailcat".into()), Some("tc-secret".into())).unwrap(),
+            ("tailcat".into(), Some("tc-secret".into())),
+        );
+    }
 }
 
 #[tauri::command]
@@ -13759,7 +13760,7 @@ pub fn run() {
             accept_share, import_shared_profile, restore_personal_profile, share_set_role, share_revoke, share_leave, share_delete,
             profile_share_status, stop_sharing, profile_sync_stats,
             set_editor_label,
-            add_server, save_quick_connect_node, edit_server, delete_server, add_mirror_to_server, get_servers, get_ssh_keys, set_server_color, set_folder_color, set_server_notes, set_server_run_on_connect, set_server_jump_host, set_server_transport, reorder_servers, clone_server, reveal_server_password, reveal_server_tailcat_address, reveal_credential_password, reveal_ssh_key,
+            add_server, save_quick_connect_node, edit_server, delete_server, add_mirror_to_server, get_servers, get_ssh_keys, set_server_color, set_folder_color, set_server_notes, set_server_run_on_connect, set_server_jump_host, tailcat_available, reorder_servers, clone_server, reveal_server_password, reveal_server_tailcat_address, reveal_credential_password, reveal_ssh_key,
             get_credentials, generate_ssh_key,
             add_folder, rename_folder, delete_folder, get_folders,
             add_command, edit_command, delete_command, get_commands,

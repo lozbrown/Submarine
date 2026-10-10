@@ -198,6 +198,7 @@ function DesktopApp() {
   const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isQuickConnectOpen, setIsQuickConnectOpen] = useState(false);
+  const [tailcatAvailable, setTailcatAvailable] = useState(false);
   const [servers, setServers] = useState<any[]>([]);
   const [credentials, setCredentials] = useState<any[]>([]);
   const [sshKeys, setSshKeys] = useState<any[]>([]);
@@ -421,6 +422,10 @@ function DesktopApp() {
       refreshNotes(),
     ]);
   };
+
+  useEffect(() => {
+    invoke<boolean>("tailcat_available").then(setTailcatAvailable).catch(() => setTailcatAvailable(false));
+  }, []);
 
   // Per-entity cloud sync of the currently-open profile. Pushes every locally
   // changed record and merges back the server's view (Last-Write-Wins by HLC),
@@ -802,7 +807,6 @@ function DesktopApp() {
       proxyPort: server.proxy_port || 1080,
       transport: server.transport || "direct",
       tailcatAddress: revealedTailcatAddress,
-      tailcatAddressDirty: false,
       tunnels: server.tunnels ? JSON.parse(server.tunnels) : [],
       autostart: !!server.autostart,
       mirrors: (() => {
@@ -2494,6 +2498,8 @@ function DesktopApp() {
               autostart: !!newNode.autostart,
               mirrors: newNode.mirrors || [],
               color: newNode.color ?? null,
+              transport: newNode.transport || "direct",
+              tailcatAddress: newNode.transport === "tailcat" ? (newNode.tailcatAddress || null) : null,
               // Edit-mode + untouched password field = ask the backend to
               // keep the existing column. Otherwise the bind below sends
               // whatever's in the field (including empty / null) which
@@ -2505,12 +2511,6 @@ function DesktopApp() {
               : invoke<number>("add_server", payload);
 
             const savedId = await action;
-            await invoke("set_server_transport", {
-              id: savedId,
-              transport: newNode.transport || "direct",
-              tailcatAddress: newNode.transport === "tailcat" ? (newNode.tailcatAddress || null) : null,
-              preserveTailcatAddress: !!newNode.id && !newNode.tailcatAddressDirty,
-            });
             // Notes live on the server row but go through their own command
             // (set_server_notes) so we don't have to thread a long-text field
             // through every add/edit_server signature. Empty string is valid
@@ -2556,12 +2556,14 @@ function DesktopApp() {
         refreshServers={refreshServers}
         servers={servers}
         isMobile={isMobile}
+        tailcatAvailable={tailcatAvailable}
       />
 
       <QuickConnectModal
         isOpen={isQuickConnectOpen}
         onClose={() => setIsQuickConnectOpen(false)}
         onConnect={openQuickConnect}
+        tailcatAvailable={tailcatAvailable}
       />
 
 

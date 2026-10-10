@@ -24,9 +24,10 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onConnect: (auth: QuickAuth) => void;
+  tailcatAvailable: boolean;
 }
 
-const QuickConnectModal = ({ isOpen, onClose, onConnect }: Props) => {
+const QuickConnectModal = ({ isOpen, onClose, onConnect, tailcatAvailable }: Props) => {
   const [host, setHost] = useState("");
   const [transport, setTransport] = useState<"direct" | "tailcat">("direct");
   const [tailcatAddress, setTailcatAddress] = useState("");
@@ -92,7 +93,7 @@ const QuickConnectModal = ({ isOpen, onClose, onConnect }: Props) => {
           <div className="flex justify-between items-center">
             <label className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider ml-0.5">Transport</label>
             <select value={transport} onChange={e => setTransport(e.target.value as "direct" | "tailcat")} className="h-8 px-2 bg-zinc-900/60 border border-white/10 rounded-lg text-[12px] text-zinc-50 outline-none">
-              <option value="direct">Direct</option><option value="tailcat">Tailcat</option>
+              <option value="direct">Direct</option>{tailcatAvailable && <option value="tailcat">Tailcat</option>}
             </select>
           </div>
           {/* Host + port */}

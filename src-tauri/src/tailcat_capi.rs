@@ -12,7 +12,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex, OnceLock, Weak,
     },
     task::{Context, Poll},
     time::Duration,
@@ -199,7 +199,8 @@ impl Client {
         status(
             unsafe { ffi::tc_client_new(config.as_ptr().cast_mut(), &mut handle, &mut error) },
             error,
-        )?;
+        )
+        .map_err(|error| error.replace(address.trim(), redact(address)))?;
         if handle == 0 {
             return Err("Tailcat native transport returned an invalid client handle".into());
         }
@@ -256,6 +257,33 @@ impl Client {
         .map_err(|_| "Tailcat TCP dial task stopped unexpectedly".to_string())??;
         TailcatStream::from_connection(connection).await
     }
+}
+
+/// Opens a stream through a process-wide client cache. Keys are SHA-256
+/// digests, never Tailcat addresses, so diagnostics and map keys cannot expose
+/// the address capability. A live SSH/SFTP/monitor stream retains its client;
+/// when the last stream closes the weak cache entry naturally expires.
+pub async fn open_tcp(address: &str, port: u16) -> Result<TailcatStream, String> {
+    type ClientCache = std::collections::HashMap<[u8; 32], Weak<ClientInner>>;
+    static CLIENTS: OnceLock<Mutex<ClientCache>> = OnceLock::new();
+
+    let digest: [u8; 32] = Sha256::digest(address.trim().as_bytes()).into();
+    let clients = CLIENTS.get_or_init(|| Mutex::new(ClientCache::new()));
+    let client = {
+        let mut clients = clients
+            .lock()
+            .map_err(|_| "Tailcat client cache lock failed".to_string())?;
+        clients.retain(|_, client| client.strong_count() != 0);
+        match clients.get(&digest).and_then(Weak::upgrade) {
+            Some(inner) => Client { inner },
+            None => {
+                let client = Client::new(address)?;
+                clients.insert(digest, Arc::downgrade(&client.inner));
+                client
+            }
+        }
+    };
+    client.open_tcp(port).await
 }
 
 struct ConnectionInner {

@@ -42,7 +42,7 @@ type ImportedSshKey = {
   encrypted: boolean;
 };
 
-const AddNodePanel = ({ isOpen, onClose, newNode, setNewNode, onSave, credentials, sshKeys, refreshSshKeys, folders, refreshFolders, refreshServers, servers, isEditMode, formError, isMobile }: any) => {
+const AddNodePanel = ({ isOpen, onClose, newNode, setNewNode, onSave, credentials, sshKeys, refreshSshKeys, folders, refreshFolders, refreshServers, servers, isEditMode, formError, isMobile, tailcatAvailable }: any) => {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   // Set while the native key picker is open so the Browse button can't be
@@ -467,13 +467,13 @@ const AddNodePanel = ({ isOpen, onClose, newNode, setNewNode, onSave, credential
                 onChange={e => setNewNode({ ...newNode, transport: e.target.value, proxyType: e.target.value === "tailcat" ? "none" : newNode.proxyType, jumpHostId: e.target.value === "tailcat" ? "" : newNode.jumpHostId })}
               >
                 <option value="direct">Direct</option>
-                <option value="tailcat">Tailcat</option>
+                {(tailcatAvailable || newNode.transport === "tailcat") && <option value="tailcat" disabled={!tailcatAvailable}>Tailcat{tailcatAvailable ? "" : " (not included in this build)"}</option>}
               </select>
             </div>
             <div className="grid grid-cols-4 gap-4">
               <div className="col-span-3 space-y-1.5">
                 <label className="text-[11px] font-bold text-zinc-400 ml-1">{newNode.transport === "tailcat" ? "Tailcat address" : "Host"}</label>
-                <input type={newNode.transport === "tailcat" ? "password" : "text"} autoComplete="off" className="w-full h-9 bg-[#1a1a1e] rounded-lg px-3 text-[12px] text-white border border-white/10 outline-none focus:border-primary/50 focus:bg-[#232328] transition-all shadow-inner" placeholder={newNode.transport === "tailcat" ? "tc…" : "192.168.1.1 or example.com"} value={newNode.transport === "tailcat" ? (newNode.tailcatAddress || "") : newNode.host} onChange={e => newNode.transport === "tailcat" ? setNewNode({ ...newNode, tailcatAddress: e.target.value, tailcatAddressDirty: true }) : setNewNode({ ...newNode, host: e.target.value })} />
+                <input type={newNode.transport === "tailcat" ? "password" : "text"} autoComplete="off" className="w-full h-9 bg-[#1a1a1e] rounded-lg px-3 text-[12px] text-white border border-white/10 outline-none focus:border-primary/50 focus:bg-[#232328] transition-all shadow-inner" placeholder={newNode.transport === "tailcat" ? "tc…" : "192.168.1.1 or example.com"} value={newNode.transport === "tailcat" ? (newNode.tailcatAddress || "") : newNode.host} onChange={e => newNode.transport === "tailcat" ? setNewNode({ ...newNode, tailcatAddress: e.target.value }) : setNewNode({ ...newNode, host: e.target.value })} />
               </div>
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-zinc-400 ml-1">Port</label>

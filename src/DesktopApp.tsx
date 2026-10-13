@@ -807,6 +807,7 @@ function DesktopApp() {
       proxyPort: server.proxy_port || 1080,
       transport: server.transport || "direct",
       tailcatAddress: revealedTailcatAddress,
+      tailcatAddressDirty: false,
       tunnels: server.tunnels ? JSON.parse(server.tunnels) : [],
       autostart: !!server.autostart,
       mirrors: (() => {

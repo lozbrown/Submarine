@@ -119,6 +119,11 @@ const QuickConnectModal = ({ isOpen, onClose, onConnect, tailcatAvailable }: Pro
               />
             </div>
           </div>
+          {transport === "tailcat" && (
+            <p className="text-[10px] leading-relaxed text-amber-200/80">
+              This address is a capability secret. It is stored in the encrypted profile and syncs to your devices and profile collaborators; only use it in profiles you trust.
+            </p>
+          )}
 
           {/* Username */}
           <div className="space-y-1">

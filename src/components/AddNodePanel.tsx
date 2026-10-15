@@ -484,6 +484,11 @@ const AddNodePanel = ({ isOpen, onClose, newNode, setNewNode, onSave, credential
                 <input type="number" className="w-full h-9 bg-[#1a1a1e] rounded-lg px-3 text-[12px] text-white border border-white/10 outline-none focus:border-primary/50 focus:bg-[#232328] transition-all shadow-inner" value={newNode.port} onChange={e => setNewNode({ ...newNode, port: parseInt(e.target.value) })} />
               </div>
             </div>
+            {newNode.transport === "tailcat" && (
+              <p className="text-[10px] leading-relaxed text-amber-200/80">
+                This address is a capability secret. It is stored in the encrypted profile and syncs to your devices and profile collaborators; only use it in profiles you trust.
+              </p>
+            )}
 
           </div>
 

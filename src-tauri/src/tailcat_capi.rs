@@ -94,15 +94,15 @@ pub fn native_abi_version() -> u32 {
     unsafe { ffi::tc_abi_version() }
 }
 
-fn redact_native_detail(detail: String) -> String {
-    if detail.contains("tc") {
-        "[redacted]".into()
-    } else {
+fn redact_native_detail(detail: String, address: &str) -> String {
+    if address.is_empty() {
         detail
+    } else {
+        detail.replace(address, "[redacted]")
     }
 }
 
-fn native_error(status: i32, error: *mut c_char) -> String {
+fn native_error(status: i32, error: *mut c_char, address: Option<&str>) -> String {
     // libtailcat documents that configuration errors never echo secrets. Keep
     // that boundary nevertheless: only error text allocated by libtailcat is
     // read and immediately returned/freed; the caller's address is never
@@ -124,13 +124,13 @@ fn native_error(status: i32, error: *mut c_char) -> String {
         // libtailcat version turn a capability into an application log entry.
         Some(detail) if !detail.is_empty() => format!(
             "Tailcat native transport failed (status {status}): {}",
-            redact_native_detail(detail)
+            redact_native_detail(detail, address.unwrap_or_default())
         ),
         _ => format!("Tailcat native transport failed (status {status})"),
     }
 }
 
-fn status(result: i32, error: *mut c_char) -> Result<(), String> {
+fn status(result: i32, error: *mut c_char, address: Option<&str>) -> Result<(), String> {
     if result == ffi::OK {
         if !error.is_null() {
             // Defensive cleanup for an ABI violation; a success error is not
@@ -139,7 +139,7 @@ fn status(result: i32, error: *mut c_char) -> Result<(), String> {
         }
         Ok(())
     } else {
-        Err(native_error(result, error))
+        Err(native_error(result, error, address))
     }
 }
 
@@ -163,6 +163,7 @@ fn timeout_token(timeout: Duration) -> Result<ffi::Handle, String> {
     status(
         unsafe { ffi::tc_token_new(nanos, &mut token, &mut error) },
         error,
+        None,
     )?;
     Ok(token)
 }
@@ -176,6 +177,7 @@ pub struct Client {
 
 struct ClientInner {
     handle: ffi::Handle,
+    address: String,
     closed: AtomicBool,
 }
 
@@ -200,7 +202,8 @@ impl Client {
         }
         // `json!` ensures the address is correctly escaped before it crosses
         // the C ABI; do not concatenate a secret into JSON manually.
-        let config = serde_json::json!({ "address": address.trim() }).to_string();
+        let address = address.trim();
+        let config = serde_json::json!({ "address": address }).to_string();
         let config = CString::new(config)
             .map_err(|_| "Tailcat address contains an unsupported NUL byte".to_string())?;
         let mut handle = 0;
@@ -210,14 +213,15 @@ impl Client {
         status(
             unsafe { ffi::tc_client_new(config.as_ptr().cast_mut(), &mut handle, &mut error) },
             error,
-        )
-        .map_err(|error| error.replace(address.trim(), redact(address)))?;
+            Some(address),
+        )?;
         if handle == 0 {
             return Err("Tailcat native transport returned an invalid client handle".into());
         }
         Ok(Self {
             inner: Arc::new(ClientInner {
                 handle,
+                address: address.to_string(),
                 closed: AtomicBool::new(false),
             }),
         })
@@ -249,7 +253,7 @@ impl Client {
                 )
             };
             close_handle(token);
-            status(result, error)?;
+            status(result, error, Some(&client.address))?;
             if handle == 0 {
                 return Err(
                     "Tailcat native transport returned an invalid connection handle".into(),
@@ -340,7 +344,7 @@ impl ConnectionInner {
             }
             return Ok((buffer, true));
         }
-        status(result, error)?;
+        status(result, error, Some(&self.client.address))?;
         Ok((buffer, false))
     }
 
@@ -360,7 +364,7 @@ impl ConnectionInner {
                     &mut error,
                 )
             };
-            status(result, error)?;
+            status(result, error, Some(&self.client.address))?;
             if count == 0 {
                 return Err("Tailcat native transport made no write progress".into());
             }
@@ -498,7 +502,14 @@ mod tests {
 
     #[test]
     fn native_error_detail_cannot_expose_a_capability() {
-        assert_eq!(redact_native_detail("dial tcABCDEF-secret failed".into()), "[redacted]");
+        assert_eq!(
+            redact_native_detail("dial tcABCDEF-secret failed".into(), "tcABCDEF-secret"),
+            "dial [redacted] failed"
+        );
+        assert_eq!(
+            redact_native_detail("tcp dial failed while fetch returned an error".into(), "tcABCDEF-secret"),
+            "tcp dial failed while fetch returned an error"
+        );
     }
 
     #[test]

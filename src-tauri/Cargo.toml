@@ -7,6 +7,13 @@ license = "MIT"
 edition = "2021"
 rust-version = "1.90"
 
+[features]
+# Tailcat's in-process C ABI is intentionally opt-in while it is awaiting an
+# upstream release containing libtailcat. Enabling it requires a matching
+# native library directory through SUBMARINE_LIBTAILCAT_DIR; normal Submarine
+# builds neither link nor package Go/Tailcat code.
+tailcat-capi = []
+
 # Library + binary dual target. The Tauri Builder, command registry, and
 # state setup live in `src/lib.rs::run()`. The bin entry point (`src/main.rs`)
 # is a one-liner that calls `submarine_lib::run()` on desktop; on Android
